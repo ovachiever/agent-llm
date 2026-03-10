@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${AGENT_LLM_HOME:-${HOME}/.agent-llm}"
+PID_FILE="${STATE_DIR}/gateway.pid"
+HOST="${AGENT_LLM_HOST:-127.0.0.1}"
+PORT="${AGENT_LLM_PORT:-8787}"
+HEALTH_URL="http://${HOST}:${PORT}/health"
+
+if [[ -f "${PID_FILE}" ]]; then
+  PID="$(cat "${PID_FILE}")"
+  if kill -0 "${PID}" 2>/dev/null; then
+    echo "gateway pid: ${PID}"
+  else
+    echo "gateway pid file exists but process is not running"
+  fi
+else
+  echo "gateway pid: not running"
+fi
+
+if command -v curl >/dev/null 2>&1; then
+  if curl --silent --fail "${HEALTH_URL}" >/dev/null 2>&1; then
+    echo "health: ok (${HEALTH_URL})"
+  else
+    echo "health: unavailable (${HEALTH_URL})"
+  fi
+else
+  echo "health: curl not available"
+fi

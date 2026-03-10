@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+STATE_DIR="${AGENT_LLM_HOME:-${HOME}/.agent-llm}"
+LOG_DIR="${STATE_DIR}/logs"
+PID_FILE="${STATE_DIR}/gateway.pid"
+LOG_FILE="${LOG_DIR}/gateway.log"
+HOST="${AGENT_LLM_HOST:-127.0.0.1}"
+PORT="${AGENT_LLM_PORT:-8787}"
+
+mkdir -p "${LOG_DIR}"
+
+if [[ -f "${PID_FILE}" ]]; then
+  EXISTING_PID="$(cat "${PID_FILE}")"
+  if kill -0 "${EXISTING_PID}" 2>/dev/null; then
+    echo "agent-llm gateway already running on pid ${EXISTING_PID}"
+    exit 0
+  fi
+  rm -f "${PID_FILE}"
+fi
+
+cd "${REPO_ROOT}"
+nohup cargo run -p agent-llm-gateway -- --host "${HOST}" --port "${PORT}" >>"${LOG_FILE}" 2>&1 &
+PID=$!
+echo "${PID}" > "${PID_FILE}"
+sleep 1
+
+if kill -0 "${PID}" 2>/dev/null; then
+  echo "agent-llm gateway started on pid ${PID}"
+  echo "log: ${LOG_FILE}"
+else
+  echo "failed to start agent-llm gateway; check ${LOG_FILE}" >&2
+  exit 1
+fi

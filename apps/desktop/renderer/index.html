@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agent-llm</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Local Gateway Control</p>
+          <h1>agent-llm</h1>
+          <p class="lede">
+            Native tray shell for the local gateway. It polls the admin API and surfaces
+            provider profiles, project mappings, and recent traffic.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-button" class="button button-primary">Refresh</button>
+          <button id="open-api-button" class="button">Open API Base</button>
+        </div>
+      </header>
+
+      <section id="status-banner" class="status-banner status-banner-pending">
+        Waiting for gateway status…
+      </section>
+
+      <section class="meta-grid">
+        <article class="card">
+          <span class="card-label">Admin API</span>
+          <strong id="base-url-value" class="metric-value">http://127.0.0.1:8787/admin</strong>
+          <span id="last-updated-value" class="card-caption">No successful refresh yet.</span>
+        </article>
+        <article class="card">
+          <span class="card-label">Providers</span>
+          <strong id="providers-count" class="metric-value">0</strong>
+          <span class="card-caption">Configured upstream labs and routers.</span>
+        </article>
+        <article class="card">
+          <span class="card-label">Projects</span>
+          <strong id="projects-count" class="metric-value">0</strong>
+          <span class="card-caption">Local projects linked to the gateway.</span>
+        </article>
+        <article class="card">
+          <span class="card-label">Recent Requests</span>
+          <strong id="requests-count" class="metric-value">0</strong>
+          <span class="card-caption">Latest requests recorded by the admin API.</span>
+        </article>
+      </section>
+
+      <main class="dashboard-grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Add Auth Profile</h2>
+          </div>
+          <form id="profile-form" class="stack-form">
+            <div class="form-grid">
+              <label class="field">
+                <span>Provider</span>
+                <select id="profile-provider" name="provider">
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Auth mode</span>
+                <select id="profile-auth-mode" name="auth_mode"></select>
+              </label>
+
+              <label class="field">
+                <span>Profile name</span>
+                <input id="profile-name" name="name" type="text" placeholder="claude-console" required />
+              </label>
+
+              <label class="field">
+                <span>Secret or session token</span>
+                <input id="profile-secret" name="secret" type="password" placeholder="Paste the token used locally on this Mac" required />
+              </label>
+            </div>
+
+            <label class="field field-wide">
+              <span>Extra headers JSON</span>
+              <textarea
+                id="profile-headers-json"
+                name="headers_json"
+                rows="5"
+                placeholder='{"anthropic-beta":"context-1m-2025-08-07"}'
+              ></textarea>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="profile-default" name="is_default" type="checkbox" />
+              <span>Set as the provider default profile</span>
+            </label>
+
+            <div class="form-meta">
+              <p id="profile-mode-hint" class="hint">
+                Local session profiles are for your own OpenAI or Anthropic session-backed billing on this machine.
+              </p>
+              <div class="hero-actions">
+                <button id="profile-submit" type="submit" class="button button-primary">Create Profile</button>
+              </div>
+            </div>
+
+            <div id="profile-feedback" class="inline-message" aria-live="polite"></div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Gateway Status</h2>
+          </div>
+          <dl id="status-details" class="detail-list">
+            <div class="empty-state">Waiting for first refresh.</div>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Providers</h2>
+          </div>
+          <div id="providers-list" class="list-panel">
+            <div class="empty-state">No provider data loaded yet.</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Projects</h2>
+          </div>
+          <div id="projects-list" class="list-panel">
+            <div class="empty-state">No project data loaded yet.</div>
+          </div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-heading">
+            <h2>Recent Requests</h2>
+          </div>
+          <div id="requests-table-wrapper" class="table-wrapper">
+            <div class="empty-state">No request data loaded yet.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

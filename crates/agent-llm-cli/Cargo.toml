@@ -1,0 +1,12 @@
+[package]
+name = "agent-llm-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-llm-core = { path = "../agent-llm-core" }
+anyhow.workspace = true
+clap.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+serde_json.workspace = true
