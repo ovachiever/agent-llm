@@ -29,7 +29,7 @@ effort maps to `reasoning_effort` on Chat Completions and to a
 
 ## Codex config
 
-Add to `~/.codex/config.toml`:
+Add the provider to `~/.codex/config.toml`:
 
 ```toml
 [model_providers.agent-llm]
@@ -37,13 +37,20 @@ name = "agent-llm gateway"
 base_url = "http://127.0.0.1:8787/v1"
 env_key = "AGENT_LLM_PROJECT_KEY"
 wire_api = "responses"
+```
 
-[profiles.k3]
+Profiles live in per-file configs (inline `[profiles.*]` tables are legacy and
+rejected). `~/.codex/k3.config.toml`:
+
+```toml
 model_provider = "agent-llm"
 model = "openrouter/moonshotai/kimi-k3"
 model_reasoning_effort = "high"
+```
 
-[profiles.local-oss]
+`~/.codex/local-oss.config.toml`:
+
+```toml
 model_provider = "agent-llm"
 model = "lmstudio/openai/gpt-oss-20b"
 ```
