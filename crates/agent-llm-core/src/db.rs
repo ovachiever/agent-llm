@@ -163,7 +163,9 @@ impl Database {
             ProviderRecord {
                 provider: "kimi".into(),
                 display_name: "Kimi (Moonshot)".into(),
-                upstream_base_url: "https://api.kimi.com/coding".into(),
+                // Platform pay-per-token endpoint, Anthropic dialect. The Kimi Code
+                // subscription endpoint (api.kimi.com/coding) is closed to new signups.
+                upstream_base_url: "https://api.moonshot.ai/anthropic".into(),
                 local_base_url: format!("{}/kimi", settings::default_admin_base_url()),
                 models_path: "/v1/models".into(),
             },
@@ -769,7 +771,7 @@ mod tests {
         let db = Database::open(&path).expect("db opens");
 
         let kimi = db.provider(ProviderKind::Kimi).expect("kimi seeded");
-        assert_eq!(kimi.upstream_base_url, "https://api.kimi.com/coding");
+        assert_eq!(kimi.upstream_base_url, "https://api.moonshot.ai/anthropic");
         let lmstudio = db
             .provider(ProviderKind::LmStudio)
             .expect("lmstudio seeded");

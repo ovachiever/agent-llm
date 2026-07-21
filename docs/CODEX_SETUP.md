@@ -12,7 +12,8 @@ The `model` field carries a provider prefix:
 
 | model | upstream | dialect on the wire |
 |---|---|---|
-| `kimi/k3` | api.kimi.com/coding | Anthropic Messages |
+| `openrouter/moonshotai/kimi-k3` | openrouter.ai | Chat Completions |
+| `kimi/kimi-k2.6` | api.moonshot.ai/anthropic | Anthropic Messages |
 | `lmstudio/openai/gpt-oss-20b` | 127.0.0.1:1234 | Chat Completions |
 | `anthropic/claude-sonnet-5` | api.anthropic.com | Anthropic Messages |
 | `openrouter/minimax/minimax-m2.7` | openrouter.ai | Chat Completions |
@@ -39,7 +40,7 @@ wire_api = "responses"
 
 [profiles.k3]
 model_provider = "agent-llm"
-model = "kimi/k3"
+model = "openrouter/moonshotai/kimi-k3"
 model_reasoning_effort = "high"
 
 [profiles.local-oss]
@@ -57,8 +58,12 @@ codex --profile local-oss "write a commit message for the staged diff"
 
 ## Provider prerequisites
 
-- **kimi**: add a Kimi Code Console API key once:
-  `agent-llm auth add --provider kimi --name kimi-code --auth-mode api_key --secret-env KIMI_CODE_KEY --default`
+- **kimi**: points at Moonshot's pay-per-token platform endpoint
+  (`api.moonshot.ai/anthropic`; the Kimi Code subscription is closed to new
+  signups). Requires a funded platform account. K3 itself is not on the
+  platform tier — use `openrouter/moonshotai/kimi-k3` for K3, and note the
+  OpenRouter account's provider policy must permit Moonshot AI
+  (openrouter.ai/settings): K3 has a single upstream provider.
 - **lmstudio**: nothing — a default no-auth profile ships preconfigured. Start
   the server with `lms server start` (or the LM Studio UI). `GET /v1/models`
   live-refreshes the local model list whenever the server is reachable.

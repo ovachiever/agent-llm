@@ -170,15 +170,14 @@ Example:
 }
 ```
 
-### Kimi (Moonshot) via Kimi Code
+### Kimi (Moonshot)
 
-The `kimi` provider targets the Kimi Code subscription endpoint (`https://api.kimi.com/coding`), which speaks the Anthropic Messages protocol.
+The `kimi` provider targets Moonshot's pay-per-token platform endpoint (`https://api.moonshot.ai/anthropic`, Anthropic Messages protocol). The Kimi Code subscription endpoint (`api.kimi.com/coding`) closed to new signups in July 2026.
 
-- Auth: an API key from the Kimi Code Console, stored as a normal `api_key` profile (`agent-llm auth add --provider kimi ...`). The gateway sends it as `x-api-key` plus `anthropic-version`, so Anthropic SDKs work unchanged.
-- Claude Code: set `ANTHROPIC_BASE_URL=http://127.0.0.1:8787/kimi` and `ANTHROPIC_API_KEY=<project key>` to run a session on K3 with request logging.
-- Codex: use model `kimi/k3` through `/v1/responses` (see `docs/CODEX_SETUP.md`).
-- Known endpoint quirks: no WebFetch-style server tools, and K3 currently runs at full reasoning depth regardless of requested effort.
-- Quota is subscription-based (weekly window + rolling 5-hour cap), so `estimated_cost_usd` stays empty by design.
+- Auth: a platform.moonshot.ai API key stored as a normal `api_key` profile. Both `x-api-key` and bearer auth are accepted upstream; the gateway sends `x-api-key` plus `anthropic-version`.
+- The platform tier currently serves `kimi-k2.6` and `kimi-k2.7-code` — **not K3**. Verify with the models list before assuming; the account must be funded or every call returns `exceeded_current_quota_error`.
+- **K3 route:** `openrouter/moonshotai/kimi-k3` through `/v1/responses` ($3/M in, $15/M out, 1M context, int4). K3 has exactly one OpenRouter upstream (Moonshot AI), so the OpenRouter account's provider policy must permit it — a restrictive data-policy setting yields `404 No allowed providers are available`.
+- Claude Code: `ANTHROPIC_BASE_URL=http://127.0.0.1:8787/kimi` + project key runs a session on the platform models with request logging.
 
 ### LM Studio (local)
 

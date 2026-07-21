@@ -42,6 +42,10 @@ pub fn lookup(provider: ProviderKind, model: &str) -> Option<PricingRule> {
             prompt_per_million: 2.0,
             completion_per_million: 8.0,
         },
+        ProviderKind::OpenRouter if lower.contains("moonshotai/kimi-k3") => PricingRule {
+            prompt_per_million: 3.0,
+            completion_per_million: 15.0,
+        },
         _ => return None,
     };
 
