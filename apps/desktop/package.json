@@ -1,13 +1,41 @@
 {
-  "name": "@agent-llm/desktop",
+  "name": "agent-llm-desktop",
   "version": "0.1.0",
   "private": true,
+  "productName": "agent-llm",
+  "author": "ovachiever",
   "description": "Electron tray and admin shell for agent-llm.",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack:mac": "electron-builder --mac dir",
+    "dist:mac": "electron-builder --mac dir zip"
+  },
+  "build": {
+    "appId": "com.ovachiever.agentllm",
+    "productName": "agent-llm",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "build/icon.png"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "target": [
+        "dir",
+        "zip"
+      ]
+    }
   },
   "devDependencies": {
-    "electron": "^37.2.0"
+    "electron": "^37.2.0",
+    "electron-builder": "^24.13.3"
   }
 }

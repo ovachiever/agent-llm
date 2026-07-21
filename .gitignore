@@ -3,6 +3,9 @@
 /node_modules
 **/node_modules
 **/dist
+apps/desktop/release
+apps/macos/.build
+apps/macos/release
 /.idea
 /.vscode
 /.DS_Store
@@ -16,3 +19,7 @@
 *.db
 *.db-shm
 *.db-wal
+
+# ZPC memory (local, git-ignored)
+.zpc/
+!.zpc/team/

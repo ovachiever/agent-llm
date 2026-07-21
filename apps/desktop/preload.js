@@ -10,4 +10,9 @@ contextBridge.exposeInMainWorld("agentLlm", {
     ipcRenderer.on("agent-llm:snapshot-updated", listener);
     return () => ipcRenderer.removeListener("agent-llm:snapshot-updated", listener);
   },
+  onCommand: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("agent-llm:command", listener);
+    return () => ipcRenderer.removeListener("agent-llm:command", listener);
+  },
 });

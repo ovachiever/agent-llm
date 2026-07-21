@@ -20,12 +20,18 @@ const AUTH_MODE_OPTIONS = {
 };
 
 const elements = {
+  toolbarKicker: document.getElementById("toolbar-kicker"),
   banner: document.getElementById("status-banner"),
   baseUrl: document.getElementById("base-url-value"),
+  overviewBaseUrl: document.getElementById("overview-base-url"),
   lastUpdated: document.getElementById("last-updated-value"),
+  overviewLastUpdated: document.getElementById("overview-last-updated"),
   providersCount: document.getElementById("providers-count"),
+  overviewProvidersCount: document.getElementById("overview-providers-count"),
   projectsCount: document.getElementById("projects-count"),
+  overviewProjectsCount: document.getElementById("overview-projects-count"),
   requestsCount: document.getElementById("requests-count"),
+  overviewRequestsCount: document.getElementById("overview-requests-count"),
   statusDetails: document.getElementById("status-details"),
   providersList: document.getElementById("providers-list"),
   projectsList: document.getElementById("projects-list"),
@@ -42,7 +48,17 @@ const elements = {
   profileFeedback: document.getElementById("profile-feedback"),
   profileModeHint: document.getElementById("profile-mode-hint"),
   profileSubmit: document.getElementById("profile-submit"),
+  navItems: Array.from(document.querySelectorAll("[data-view-target]")),
+  views: Array.from(document.querySelectorAll("[data-view]")),
 };
+
+const VIEW_TITLES = {
+  overview: "Overview",
+  auth: "Auth Profiles",
+  activity: "Activity",
+};
+
+let activeView = "overview";
 
 function escapeHtml(value) {
   return String(value)
@@ -96,6 +112,25 @@ function setFeedback(message, tone = "") {
     elements.profileFeedback.classList.add(`inline-message-${tone}`);
   }
   elements.profileFeedback.textContent = message || "";
+}
+
+function setActiveView(view, focusTarget) {
+  activeView = VIEW_TITLES[view] ? view : "overview";
+  elements.toolbarKicker.textContent = VIEW_TITLES[activeView];
+
+  for (const item of elements.navItems) {
+    item.classList.toggle("is-active", item.dataset.viewTarget === activeView);
+  }
+
+  for (const pane of elements.views) {
+    pane.classList.toggle("is-active", pane.dataset.view === activeView);
+  }
+
+  if (focusTarget && elements[focusTarget]) {
+    window.requestAnimationFrame(() => {
+      elements[focusTarget].focus();
+    });
+  }
 }
 
 function providerDisplayName(provider) {
@@ -395,12 +430,17 @@ function renderRequests(snapshot) {
 function renderSnapshot(snapshot) {
   renderBanner(snapshot);
   elements.baseUrl.textContent = snapshot.baseUrl || "Unknown";
+  elements.overviewBaseUrl.textContent = snapshot.baseUrl || "Unknown";
   elements.lastUpdated.textContent = snapshot.fetchedAt
     ? `Last refresh: ${formatTimestamp(snapshot.fetchedAt)}`
     : "No successful refresh yet.";
+  elements.overviewLastUpdated.textContent = elements.lastUpdated.textContent;
   elements.providersCount.textContent = String(normalizeItems(snapshot.providers).length);
+  elements.overviewProvidersCount.textContent = elements.providersCount.textContent;
   elements.projectsCount.textContent = String(normalizeItems(snapshot.projects).length);
+  elements.overviewProjectsCount.textContent = elements.projectsCount.textContent;
   elements.requestsCount.textContent = String(normalizeItems(snapshot.requests).length);
+  elements.overviewRequestsCount.textContent = elements.requestsCount.textContent;
 
   renderStatusDetails(snapshot);
   renderProviders(snapshot);
@@ -423,10 +463,17 @@ async function refreshSnapshot() {
 
 async function bootstrap() {
   updateAuthModeOptions();
+  setActiveView(activeView);
 
   elements.refreshButton.addEventListener("click", () => {
     refreshSnapshot();
   });
+
+  for (const item of elements.navItems) {
+    item.addEventListener("click", () => {
+      setActiveView(item.dataset.viewTarget);
+    });
+  }
 
   elements.profileProvider.addEventListener("change", () => {
     updateAuthModeOptions();
@@ -446,6 +493,27 @@ async function bootstrap() {
 
   window.agentLlm.onSnapshotUpdated((snapshot) => {
     renderSnapshot(snapshot);
+  });
+
+  window.agentLlm.onCommand(async (command) => {
+    if (!command || typeof command !== "object") {
+      return;
+    }
+
+    if (command.type === "refresh") {
+      await refreshSnapshot();
+      return;
+    }
+
+    if (command.type === "open-api-base") {
+      const snapshot = await window.agentLlm.getLastSnapshot();
+      await window.agentLlm.openExternal((snapshot.baseUrl || "").replace(/\/admin\/?$/, ""));
+      return;
+    }
+
+    if (command.type === "show-view") {
+      setActiveView(command.view, command.focus);
+    }
   });
 
   window.setInterval(() => {
