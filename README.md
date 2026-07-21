@@ -1,26 +1,47 @@
 # agent-llm
 
-A local-first LLM gateway that speaks every dialect your tools do.
+A local-first control plane for every LLM-consuming project on your machine,
+that also speaks every dialect your tools do.
 
-`agent-llm` sits between the coding agents on your machine (Claude Code, Codex,
-plain SDKs) and the model providers behind them (Anthropic, OpenAI, Google,
-OpenRouter, Moonshot/Kimi, a local LM Studio server). Everything flows through
-one stable endpoint on `127.0.0.1:8787`, with API keys in the macOS Keychain,
-every request logged with tokens and estimated cost, and a native menu bar app
-showing the state of your routes at a glance.
+`agent-llm` sits between the things on your Mac that call models (Claude Code,
+Codex, plain provider SDKs, scripts, agents) and the providers behind them
+(Anthropic, OpenAI, Google, OpenRouter, Moonshot/Kimi, a local LM Studio
+server). Everything flows through one stable endpoint on `127.0.0.1:8787`,
+with API keys in the macOS Keychain, every request logged with tokens and
+estimated cost, and a native menu bar app showing the state of your routes at
+a glance.
 
-It is two things at once:
+## Why this exists
+
+If you have multiple apps, scripts, and agents talking to different model
+providers, the repetitive parts pile up quickly:
+
+- provider auth wiring, duplicated in every project
+- base-URL switching between local/dev and direct production calls
+- per-project defaults and per-project keys
+- request logging and cost visibility, or usually the absence of both
+- the choice between session-backed billing (your ChatGPT or Claude account)
+  and API-key billing, made per project instead of once
+
+`agent-llm` centralizes that control plane without forcing a custom SDK
+contract. It forwards requests without the model/parameter gatekeeping that
+wrappers like LiteLLM can introduce: existing SDKs keep talking to
+provider-shaped endpoints and keep every provider-native capability; they just
+point at `agent-llm` instead of the lab directly during local development.
+
+And because your harnesses stopped agreeing on protocols, the gateway also
+translates. Codex speaks the OpenAI Responses API; Claude Code speaks
+Anthropic Messages; providers speak one or the other. The gateway converts
+between them, streaming included, so any harness can drive any provider
+through the same URL: Claude Code on Kimi K3 or a free local model, Codex on
+anything OpenRouter serves, your normal setups untouched.
+
+So it is two things at once:
 
 - **A passthrough.** SDKs keep speaking their provider's native protocol; only
   the base URL changes. No house schema, no parameter gatekeeping.
 - **A translator.** Where a client and an upstream disagree on protocol, the
-  gateway converts between them, streaming included. Codex (Responses API) can
-  drive Anthropic-protocol models; Claude Code (Anthropic Messages) can drive
-  OpenAI-protocol models. Any harness, any provider, one URL.
-
-The practical result: run Claude Code on Kimi K3 or on a free local model, run
-Codex against anything on OpenRouter, keep your normal provider setups
-untouched, and see all of it in one request log.
+  gateway converts between them, streams and all.
 
 ## The translation triangle
 
@@ -79,6 +100,30 @@ Then point things at it:
 - **Provider SDKs** (passthrough): [`docs/USE_FROM_ANOTHER_PROJECT.md`](./docs/USE_FROM_ANOTHER_PROJECT.md)
   and [`docs/SDK_RECIPES.md`](./docs/SDK_RECIPES.md).
 - **Everything else**: the full endpoint reference is [`docs/GATEWAY_API.md`](./docs/GATEWAY_API.md).
+
+## Projects and modes
+
+Each local project gets its own gateway key (`agllm_...`) and its own
+defaults: which auth profile each provider uses, which model is preferred.
+`agent-llm project link` writes a `.env.agent-llm` file that points the
+project's SDKs at the gateway, with the project key as the local API key.
+
+The gateway is deliberately escapable. It is development infrastructure, not
+a production dependency:
+
+```bash
+./bin/agent-llm mode use-direct --project my-project   # prod-style: SDKs talk to the labs
+./bin/agent-llm mode use-local  --project my-project   # dev: back through the gateway
+```
+
+Both modes rewrite the same env file, so the switch is an environment concern,
+never a code change.
+
+Auth profiles come in two kinds, chosen per provider per project: API keys
+(direct lab billing) and session-backed accounts (ChatGPT, Claude, Google
+OAuth, connected through a browser flow, tokens auto-refreshed). That choice
+is the difference between metered API spend and using a subscription you
+already pay for, made once in the control plane instead of wired into apps.
 
 ## The menu bar app
 
@@ -144,8 +189,7 @@ ceilings) is canonical in
   profile per gateway run, not once per request.
 - The gateway binds to loopback. The menu bar app's transport policy allows
   local networking only.
-- Session-backed auth profiles (ChatGPT, Claude, Google OAuth) refresh their
-  tokens automatically.
+- Session-backed auth profiles refresh their tokens automatically.
 
 ## Limitations
 
