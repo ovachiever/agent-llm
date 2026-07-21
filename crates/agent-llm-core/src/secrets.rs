@@ -23,6 +23,7 @@ pub trait SecretStore {
         profile_name: &str,
         secret_value: &str,
     ) -> Result<SecretRef>;
+    fn overwrite_secret(&self, secret_ref: &SecretRef, secret_value: &str) -> Result<()>;
     fn read_secret(&self, secret_ref: &SecretRef) -> Result<String>;
     fn delete_secret(&self, secret_ref: &SecretRef) -> Result<()>;
 }
@@ -75,6 +76,27 @@ impl SecretStore for LocalSecretStore {
             Self::File(store) => {
                 store.store_auth_profile_secret(provider, profile_name, secret_value)
             }
+        }
+    }
+
+    fn overwrite_secret(&self, secret_ref: &SecretRef, secret_value: &str) -> Result<()> {
+        match self {
+            #[cfg(target_os = "macos")]
+            Self::Keychain(store) if secret_ref.backend == SecretBackend::Keychain => {
+                store.overwrite_secret(secret_ref, secret_value)
+            }
+            Self::File(store) if secret_ref.backend == SecretBackend::File => {
+                store.overwrite_secret(secret_ref, secret_value)
+            }
+            #[cfg(target_os = "macos")]
+            Self::Keychain(_) => Err(anyhow!(
+                "secret ref backend `{}` is not supported by the active keychain store",
+                secret_ref.backend.as_str()
+            )),
+            Self::File(_) => Err(anyhow!(
+                "secret ref backend `{}` is not supported by the active file store",
+                secret_ref.backend.as_str()
+            )),
         }
     }
 
@@ -139,6 +161,18 @@ impl SecretStore for KeychainSecretStore {
         Ok(SecretRef::new(SecretBackend::Keychain, account))
     }
 
+    fn overwrite_secret(&self, secret_ref: &SecretRef, secret_value: &str) -> Result<()> {
+        use security_framework::passwords::set_generic_password;
+
+        set_generic_password(
+            SECRET_NAMESPACE_PREFIX,
+            &secret_ref.key,
+            secret_value.as_bytes(),
+        )
+        .with_context(|| format!("failed to overwrite keychain secret `{}`", secret_ref.key))?;
+        Ok(())
+    }
+
     fn read_secret(&self, secret_ref: &SecretRef) -> Result<String> {
         use security_framework::passwords::get_generic_password;
 
@@ -199,6 +233,12 @@ impl SecretStore for FileSecretStore {
         fs::write(&path, secret_value)
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(SecretRef::new(SecretBackend::File, key))
+    }
+
+    fn overwrite_secret(&self, secret_ref: &SecretRef, secret_value: &str) -> Result<()> {
+        let path = self.secret_path(&secret_ref.key);
+        fs::write(&path, secret_value)
+            .with_context(|| format!("failed to overwrite {}", path.display()))
     }
 
     fn read_secret(&self, secret_ref: &SecretRef) -> Result<String> {
@@ -270,5 +310,20 @@ mod tests {
             .read_secret(&secret_ref)
             .expect_err("deleted secret should not be readable");
         assert!(error.to_string().contains("failed to read"));
+    }
+
+    #[test]
+    fn file_store_overwrites_existing_secret_in_place() {
+        let store = FileSecretStore::new(test_secret_dir()).expect("store creates");
+        let secret_ref = store
+            .store_auth_profile_secret(ProviderKind::Google, "oauth-profile", "first-secret")
+            .expect("secret stored");
+
+        store
+            .overwrite_secret(&secret_ref, "second-secret")
+            .expect("secret overwritten");
+
+        let value = store.read_secret(&secret_ref).expect("secret read");
+        assert_eq!(value, "second-secret");
     }
 }

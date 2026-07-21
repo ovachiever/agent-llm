@@ -1,3 +1,6 @@
+mod auth_flow;
+mod responses;
+
 use std::{net::SocketAddr, path::PathBuf, time::Instant};
 
 use agent_llm_core::{
@@ -11,7 +14,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::{any, get, post},
 };
 use clap::Parser;
@@ -25,6 +28,13 @@ use serde_json::{Value, json};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info};
 use uuid::Uuid;
+
+use crate::auth_flow::{
+    AuthAttemptManager, AuthAttemptStatus, CompleteAuthFlowRequest, StoredCredential,
+    auth_method_catalog, complete_auth_attempt_from_callback, complete_auth_attempt_with_code,
+    oauth_error_html, oauth_success_html, refresh_credential_if_needed, start_auth_flow,
+    write_refreshed_credential,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "agent-llm-gateway")]
@@ -42,6 +52,7 @@ struct AppState {
     db: Database,
     http: reqwest::Client,
     secrets: LocalSecretStore,
+    auth_attempts: AuthAttemptManager,
     host: String,
     port: u16,
 }
@@ -78,7 +89,15 @@ struct ResolvedAuthProfile {
     name: String,
     auth_mode: AuthMode,
     metadata: Value,
-    secret_value: String,
+    credential: StoredCredential,
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 #[tokio::main]
@@ -104,6 +123,7 @@ async fn main() -> Result<()> {
         db,
         http,
         secrets,
+        auth_attempts: AuthAttemptManager::default(),
         host: args.host.clone(),
         port: args.port,
     };
@@ -114,11 +134,22 @@ async fn main() -> Result<()> {
         .route("/admin/providers", get(list_providers))
         .route("/admin/projects", get(list_projects).post(create_project))
         .route("/admin/requests", get(list_requests))
+        .route("/admin/auth-methods", get(list_auth_methods))
         .route("/admin/auth-profiles", post(create_auth_profile))
+        .route("/admin/auth/start", post(start_auth_attempt))
+        .route("/admin/auth/attempts/{id}", get(get_auth_attempt))
+        .route(
+            "/admin/auth/attempts/{id}/complete",
+            post(complete_auth_attempt),
+        )
+        .route("/admin/oauth/openai/callback", get(openai_oauth_callback))
+        .route("/admin/oauth/google/callback", get(google_oauth_callback))
         .route(
             "/admin/providers/{provider}/models/refresh",
             post(refresh_models),
         )
+        .route("/v1/responses", post(responses::responses_create))
+        .route("/v1/models", get(responses::models_list))
         .route("/{provider}/{*path}", any(proxy_request))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -185,6 +216,10 @@ async fn list_requests(
     Ok(Json(json!({ "requests": requests })))
 }
 
+async fn list_auth_methods() -> Json<Value> {
+    Json(json!({ "providers": auth_method_catalog() }))
+}
+
 async fn create_auth_profile(
     State(state): State<AppState>,
     Json(payload): Json<CreateAuthProfileRequest>,
@@ -208,6 +243,82 @@ async fn create_auth_profile(
     Ok(Json(json!({ "auth_profile": profile })))
 }
 
+async fn start_auth_attempt(
+    State(state): State<AppState>,
+    Json(payload): Json<auth_flow::StartAuthFlowRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let admin_base_url = local_admin_base_url(&state.host, state.port);
+    let attempt = start_auth_flow(&admin_base_url, payload)?;
+    let response = attempt.status_response();
+    state.auth_attempts.insert(attempt)?;
+    Ok(Json(json!({ "attempt": response })))
+}
+
+async fn get_auth_attempt(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let attempt = state
+        .auth_attempts
+        .get(&id)?
+        .ok_or_else(|| ApiError::bad_request("auth attempt not found"))?;
+    Ok(Json(json!({ "attempt": attempt.status_response() })))
+}
+
+async fn complete_auth_attempt(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(payload): Json<CompleteAuthFlowRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let attempt = state
+        .auth_attempts
+        .get(&id)?
+        .ok_or_else(|| ApiError::bad_request("auth attempt not found"))?;
+    let code = payload
+        .verification_code
+        .as_deref()
+        .or(payload.code.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::bad_request("authorization code is required"))?;
+
+    match complete_auth_attempt_with_code(&state.http, &state.db, &state.secrets, &attempt, code)
+        .await
+    {
+        Ok(()) => {
+            state
+                .auth_attempts
+                .update(&id, |attempt| attempt.status = AuthAttemptStatus::Completed)?;
+            let attempt = state
+                .auth_attempts
+                .get(&id)?
+                .ok_or_else(|| ApiError::bad_request("auth attempt not found"))?;
+            Ok(Json(json!({ "attempt": attempt.status_response() })))
+        }
+        Err(error) => {
+            let message = error.message.clone();
+            let _ = state.auth_attempts.update(&id, |attempt| {
+                attempt.status = AuthAttemptStatus::Failed(message.clone())
+            });
+            Err(error)
+        }
+    }
+}
+
+async fn openai_oauth_callback(
+    State(state): State<AppState>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> Response {
+    oauth_callback(state, ProviderKind::OpenAi, query).await
+}
+
+async fn google_oauth_callback(
+    State(state): State<AppState>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> Response {
+    oauth_callback(state, ProviderKind::Google, query).await
+}
+
 async fn refresh_models(
     State(state): State<AppState>,
     Path(provider): Path<String>,
@@ -219,7 +330,7 @@ async fn refresh_models(
         .default_auth_profile(provider)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::bad_request("no default auth profile configured for provider"))?;
-    let resolved_profile = resolve_profile(&state.secrets, &profile)?;
+    let resolved_profile = resolve_profile(&state, provider, &profile).await?;
     let provider_record = state.db.provider(provider).map_err(ApiError::internal)?;
 
     let url = format!(
@@ -229,7 +340,7 @@ async fn refresh_models(
     let mut request = state.http.get(url);
     request = apply_upstream_auth(request, provider, &resolved_profile);
 
-    if provider == ProviderKind::Anthropic {
+    if matches!(provider, ProviderKind::Anthropic | ProviderKind::Kimi) {
         request = request.header("anthropic-version", "2023-06-01");
     }
 
@@ -294,11 +405,11 @@ async fn proxy_request(
         .map(|name| state.db.auth_profile_by_name(provider_kind, name))
         .transpose()
         .map_err(ApiError::internal)?;
-    let primary_profile = resolve_profile(&state.secrets, &primary_profile)?;
-    let fallback_profile = fallback_profile
-        .as_ref()
-        .map(|profile| resolve_profile(&state.secrets, profile))
-        .transpose()?;
+    let primary_profile = resolve_profile(&state, provider_kind, &primary_profile).await?;
+    let fallback_profile = match fallback_profile.as_ref() {
+        Some(profile) => Some(resolve_profile(&state, provider_kind, profile).await?),
+        None => None,
+    };
 
     let request_id = Uuid::new_v4().to_string();
     let upstream_url = build_upstream_url(&provider_record.upstream_base_url, &path, uri.query())?;
@@ -311,7 +422,9 @@ async fn proxy_request(
         .body(body.clone());
     upstream_request = apply_headers(upstream_request, &headers)?;
     upstream_request = apply_upstream_auth(upstream_request, provider_kind, &primary_profile);
-    if provider_kind == ProviderKind::Anthropic && !headers.contains_key("anthropic-version") {
+    if matches!(provider_kind, ProviderKind::Anthropic | ProviderKind::Kimi)
+        && !headers.contains_key("anthropic-version")
+    {
         upstream_request = upstream_request.header("anthropic-version", "2023-06-01");
     }
 
@@ -329,7 +442,7 @@ async fn proxy_request(
                     .as_ref()
                     .expect("guarded by should_retry_with_fallback"),
             );
-            if provider_kind == ProviderKind::Anthropic
+            if matches!(provider_kind, ProviderKind::Anthropic | ProviderKind::Kimi)
                 && !headers.contains_key("anthropic-version")
             {
                 retry_request = retry_request.header("anthropic-version", "2023-06-01");
@@ -550,18 +663,40 @@ fn apply_upstream_auth(
     match (provider, profile.auth_mode) {
         (ProviderKind::OpenAi, AuthMode::ApiKey | AuthMode::OpenAiSession)
         | (ProviderKind::OpenRouter, AuthMode::ApiKey) => {
-            builder = builder.header(AUTHORIZATION, format!("Bearer {}", profile.secret_value));
+            builder = builder.header(
+                AUTHORIZATION,
+                format!("Bearer {}", profile.credential.secret_value()),
+            );
         }
-        (ProviderKind::Anthropic, AuthMode::ApiKey) => {
-            builder = builder.header("x-api-key", &profile.secret_value);
+        (ProviderKind::Anthropic | ProviderKind::Kimi, AuthMode::ApiKey) => {
+            builder = builder.header("x-api-key", profile.credential.secret_value());
         }
         (ProviderKind::Anthropic, AuthMode::AnthropicSession) => {
-            builder = builder.header(AUTHORIZATION, format!("Bearer {}", profile.secret_value));
+            builder = builder.header(
+                AUTHORIZATION,
+                format!("Bearer {}", profile.credential.secret_value()),
+            );
         }
         (ProviderKind::Google, AuthMode::ApiKey) => {
-            builder = builder.header("x-goog-api-key", &profile.secret_value);
+            builder = builder.header("x-goog-api-key", profile.credential.secret_value());
+        }
+        (ProviderKind::Google, AuthMode::GoogleOAuth) => {
+            builder = builder.header(
+                AUTHORIZATION,
+                format!("Bearer {}", profile.credential.secret_value()),
+            );
+            if let Some(project_id) = profile.credential.project_id() {
+                builder = builder.header("x-goog-user-project", project_id);
+            }
         }
         _ => {}
+    }
+
+    if provider == ProviderKind::OpenAi
+        && profile.auth_mode == AuthMode::OpenAiSession
+        && let Some(account_id) = profile.credential.account_id()
+    {
+        builder = builder.header("chatgpt-account-id", account_id);
     }
 
     if let Some(extra_headers) = profile.metadata.get("headers").and_then(Value::as_object) {
@@ -651,9 +786,19 @@ fn extract_usage(
     };
 
     let (prompt_tokens, completion_tokens, total_tokens) = match provider {
-        ProviderKind::OpenAi | ProviderKind::OpenRouter => (
+        ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::LmStudio => (
             json.pointer("/usage/prompt_tokens").and_then(Value::as_i64),
             json.pointer("/usage/completion_tokens")
+                .and_then(Value::as_i64),
+            json.pointer("/usage/total_tokens").and_then(Value::as_i64),
+        ),
+        // Kimi serves both dialects from one endpoint; try Anthropic's shape, then OpenAI's.
+        ProviderKind::Kimi => (
+            json.pointer("/usage/input_tokens")
+                .or_else(|| json.pointer("/usage/prompt_tokens"))
+                .and_then(Value::as_i64),
+            json.pointer("/usage/output_tokens")
+                .or_else(|| json.pointer("/usage/completion_tokens"))
                 .and_then(Value::as_i64),
             json.pointer("/usage/total_tokens").and_then(Value::as_i64),
         ),
@@ -694,7 +839,11 @@ fn extract_usage(
 
 fn parse_models(provider: ProviderKind, json: Value) -> Vec<(String, String, Value)> {
     let items = match provider {
-        ProviderKind::OpenAi | ProviderKind::Anthropic | ProviderKind::OpenRouter => json
+        ProviderKind::OpenAi
+        | ProviderKind::Anthropic
+        | ProviderKind::OpenRouter
+        | ProviderKind::Kimi
+        | ProviderKind::LmStudio => json
             .get("data")
             .and_then(Value::as_array)
             .cloned()
@@ -744,6 +893,97 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+}
+
+async fn oauth_callback(
+    state: AppState,
+    provider: ProviderKind,
+    query: OAuthCallbackQuery,
+) -> Response {
+    let Some(state_value) = query
+        .state
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return html_error_response(
+            StatusCode::BAD_REQUEST,
+            "missing OAuth state parameter".to_string(),
+        );
+    };
+
+    let attempt = match state.auth_attempts.find_by_state(provider, state_value) {
+        Ok(Some(attempt)) => attempt,
+        Ok(None) => {
+            return html_error_response(
+                StatusCode::BAD_REQUEST,
+                "auth attempt was not found or expired".to_string(),
+            );
+        }
+        Err(error) => {
+            return html_error_response(error.status, error.message);
+        }
+    };
+
+    if let Some(error) = query
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let message = query
+            .error_description
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|description| format!("{error}: {description}"))
+            .unwrap_or_else(|| error.to_string());
+        let _ = state.auth_attempts.update(&attempt.id, |attempt| {
+            attempt.status = AuthAttemptStatus::Failed(message.clone())
+        });
+        return html_error_response(StatusCode::BAD_REQUEST, message);
+    }
+
+    let Some(code) = query
+        .code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        let message = "missing OAuth authorization code".to_string();
+        let _ = state.auth_attempts.update(&attempt.id, |attempt| {
+            attempt.status = AuthAttemptStatus::Failed(message.clone())
+        });
+        return html_error_response(StatusCode::BAD_REQUEST, message);
+    };
+
+    match complete_auth_attempt_from_callback(
+        &state.http,
+        &state.db,
+        &state.secrets,
+        &attempt,
+        code,
+    )
+    .await
+    {
+        Ok(()) => {
+            let _ = state.auth_attempts.update(&attempt.id, |attempt| {
+                attempt.status = AuthAttemptStatus::Completed
+            });
+            Html(oauth_success_html()).into_response()
+        }
+        Err(error) => {
+            let message = error.message.clone();
+            let _ = state.auth_attempts.update(&attempt.id, |attempt| {
+                attempt.status = AuthAttemptStatus::Failed(message.clone())
+            });
+            html_error_response(error.status, message)
+        }
+    }
+}
+
+fn html_error_response(status: StatusCode, message: String) -> Response {
+    (status, Html(oauth_error_html(&message))).into_response()
 }
 
 #[derive(Debug)]
@@ -803,21 +1043,42 @@ impl IntoResponse for ApiError {
     }
 }
 
-fn resolve_profile(
-    secrets: &LocalSecretStore,
+async fn resolve_profile(
+    state: &AppState,
+    provider: ProviderKind,
     profile: &agent_llm_core::types::AuthProfile,
 ) -> Result<ResolvedAuthProfile, ApiError> {
-    let secret_value = secrets
-        .read_secret(&profile.secret_ref)
-        .map_err(ApiError::internal)?;
+    let raw_secret = if profile.auth_mode == AuthMode::None {
+        String::new()
+    } else {
+        state
+            .secrets
+            .read_secret(&profile.secret_ref)
+            .map_err(ApiError::internal)?
+    };
+    let mut credential = StoredCredential::parse(profile.auth_mode, &raw_secret)?;
+    if let Some(refreshed) =
+        refresh_credential_if_needed(&state.http, provider, profile.auth_mode, &credential).await?
+    {
+        write_refreshed_credential(&state.secrets, &profile.secret_ref, &refreshed)?;
+        credential = refreshed;
+    }
 
     Ok(ResolvedAuthProfile {
         id: profile.id,
         name: profile.name.clone(),
         auth_mode: profile.auth_mode,
         metadata: profile.metadata.clone(),
-        secret_value,
+        credential,
     })
+}
+
+fn local_admin_base_url(host: &str, port: u16) -> String {
+    let callback_host = match host {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        other => other,
+    };
+    format!("http://{callback_host}:{port}/admin")
 }
 
 fn normalize_secret_ref(
@@ -993,6 +1254,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn google_oauth_uses_bearer_auth_and_project_header() {
+        let profile = resolved_profile(
+            AuthMode::GoogleOAuth,
+            "google-oauth",
+            "google-oauth-token",
+            json!({}),
+        );
+
+        let request = apply_upstream_auth(
+            reqwest::Client::new().get("https://example.com"),
+            ProviderKind::Google,
+            &ResolvedAuthProfile {
+                credential: StoredCredential::with_account_tokens(
+                    "google-oauth-token".into(),
+                    Some("refresh-token".into()),
+                    None,
+                    None,
+                    Some("client-id".into()),
+                    Some("client-secret".into()),
+                    Some("project-id".into()),
+                ),
+                ..profile
+            },
+        )
+        .build()
+        .expect("request builds");
+
+        assert_eq!(
+            request
+                .headers()
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer google-oauth-token")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-goog-user-project")
+                .and_then(|value| value.to_str().ok()),
+            Some("project-id")
+        );
+    }
+
     fn resolved_profile(
         auth_mode: AuthMode,
         name: &str,
@@ -1004,7 +1309,22 @@ mod tests {
             name: name.into(),
             auth_mode,
             metadata,
-            secret_value: secret_value.into(),
+            credential: match auth_mode {
+                AuthMode::ApiKey | AuthMode::None => StoredCredential::ApiKey {
+                    secret: secret_value.into(),
+                },
+                AuthMode::OpenAiSession | AuthMode::AnthropicSession | AuthMode::GoogleOAuth => {
+                    StoredCredential::with_account_tokens(
+                        secret_value.into(),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                }
+            },
         }
     }
 }

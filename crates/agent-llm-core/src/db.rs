@@ -160,6 +160,20 @@ impl Database {
                 local_base_url: format!("{}/openrouter/v1", settings::default_admin_base_url()),
                 models_path: "/v1/models".into(),
             },
+            ProviderRecord {
+                provider: "kimi".into(),
+                display_name: "Kimi (Moonshot)".into(),
+                upstream_base_url: "https://api.kimi.com/coding".into(),
+                local_base_url: format!("{}/kimi", settings::default_admin_base_url()),
+                models_path: "/v1/models".into(),
+            },
+            ProviderRecord {
+                provider: "lmstudio".into(),
+                display_name: "LM Studio (local)".into(),
+                upstream_base_url: "http://127.0.0.1:1234".into(),
+                local_base_url: format!("{}/lmstudio/v1", settings::default_admin_base_url()),
+                models_path: "/v1/models".into(),
+            },
         ];
 
         self.with_conn(|conn| {
@@ -183,6 +197,26 @@ impl Database {
                     ],
                 )?;
             }
+
+            // Projects created before a provider existed need a settings row for it.
+            conn.execute(
+                "
+                INSERT OR IGNORE INTO project_provider_settings (project_id, provider, auth_profile_id, default_model, route_mode)
+                SELECT p.id, pr.provider, NULL, NULL, 'local'
+                FROM projects p CROSS JOIN providers pr
+                ",
+                [],
+            )?;
+
+            // LM Studio needs no credentials; ship a ready-to-use default profile.
+            conn.execute(
+                "
+                INSERT INTO auth_profiles (provider, name, auth_mode, secret, secret_ref, is_default, metadata_json, created_at, updated_at)
+                VALUES ('lmstudio', 'local', 'none', '', 'file:none/lmstudio', 1, '{}', ?1, ?1)
+                ON CONFLICT(provider, name) DO NOTHING
+                ",
+                params![Utc::now().to_rfc3339()],
+            )?;
 
             Ok(())
         })
@@ -320,12 +354,7 @@ impl Database {
 
             let project_id = conn.last_insert_rowid();
 
-            for provider in [
-                ProviderKind::OpenAi,
-                ProviderKind::Anthropic,
-                ProviderKind::Google,
-                ProviderKind::OpenRouter,
-            ] {
+            for provider in ProviderKind::ALL {
                 conn.execute(
                     "INSERT INTO project_provider_settings (project_id, provider, auth_profile_id, default_model, route_mode) VALUES (?1, ?2, NULL, NULL, 'local')",
                     params![project_id, provider.as_str()],
@@ -730,6 +759,60 @@ mod tests {
             .expect("openai defaults exist");
         assert_eq!(openai.route_mode, "local");
         assert!(openai.default_model.is_none());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn seeds_kimi_and_lmstudio_providers_with_default_local_profile() {
+        let path = test_db_path();
+        let db = Database::open(&path).expect("db opens");
+
+        let kimi = db.provider(ProviderKind::Kimi).expect("kimi seeded");
+        assert_eq!(kimi.upstream_base_url, "https://api.kimi.com/coding");
+        let lmstudio = db
+            .provider(ProviderKind::LmStudio)
+            .expect("lmstudio seeded");
+        assert_eq!(lmstudio.upstream_base_url, "http://127.0.0.1:1234");
+
+        let profile = db
+            .default_auth_profile(ProviderKind::LmStudio)
+            .expect("query ok")
+            .expect("default lmstudio profile seeded");
+        assert_eq!(profile.name, "local");
+        assert_eq!(profile.auth_mode, AuthMode::None);
+
+        let project = db.create_project("new-providers").expect("project created");
+        let setting = db
+            .project_provider_setting(project.id, ProviderKind::Kimi)
+            .expect("kimi settings row exists");
+        assert_eq!(setting.route_mode, "local");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn backfills_provider_settings_for_existing_projects() {
+        let path = test_db_path();
+        let db = Database::open(&path).expect("db opens");
+        let project = db.create_project("legacy").expect("project created");
+
+        // Simulate a project that predates the kimi/lmstudio providers.
+        db.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM project_provider_settings WHERE project_id = ?1 AND provider IN ('kimi', 'lmstudio')",
+                params![project.id],
+            )?;
+            Ok(())
+        })
+        .expect("rows removed");
+
+        drop(db);
+        let db = Database::open(&path).expect("db reopens");
+        let setting = db
+            .project_provider_setting(project.id, ProviderKind::LmStudio)
+            .expect("lmstudio settings backfilled on open");
+        assert_eq!(setting.route_mode, "local");
 
         let _ = std::fs::remove_file(path);
     }

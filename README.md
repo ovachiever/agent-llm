@@ -1,6 +1,6 @@
 # agent-llm
 
-`agent-llm` is a local-first LLM gateway for projects that need one stable endpoint while preserving provider-native APIs.
+`agent-llm` is a local-first LLM gateway for projects that need one stable endpoint while preserving provider-native APIs. It is both a passthrough (SDKs keep speaking their provider's dialect) and, where a client and upstream disagree, a translator: Codex's Responses API is converted to each provider's native protocol at `/v1/responses`.
 
 It sits between your apps and upstream labs such as OpenAI, Anthropic, Google, and OpenRouter. It forwards requests without the model/parameter gatekeeping that wrappers like LiteLLM can introduce, while adding:
 
@@ -30,14 +30,25 @@ If you have multiple apps, scripts, and agents talking to different model provid
 - Anthropic passthrough under `/anthropic/*`
 - Google passthrough under `/google/*`
 - OpenRouter passthrough under `/openrouter/*`
+- Kimi (Moonshot) passthrough under `/kimi/*` — Anthropic protocol, works as a
+  Claude Code base URL
+- LM Studio passthrough under `/lmstudio/*` — local server, no auth required
+- **Responses API translation at `/v1/responses`** — Codex CLI (and any
+  Responses-API client) can drive every provider above through one endpoint
+  with `provider/model` ids; streaming, tool calls, and reasoning effort
+  translate to each upstream's native dialect (see `docs/CODEX_SETUP.md`)
+- `/v1/models` — aggregated `provider/model` catalog, with live LM Studio
+  refresh
 - admin API under `/admin/*`
 - project linking and env generation
 - auth profiles for:
   - `api_key`
   - `openai_session`
   - `anthropic_session`
+  - `none` (local servers like LM Studio)
 - macOS Keychain storage for new secrets by default
-- SQLite for metadata, projects, logs, cached models, and cost records
+- SQLite for metadata, projects, logs, cached models, and cost records —
+  including usage on streamed `/v1/responses` calls
 
 ## Repo layout
 
@@ -47,6 +58,8 @@ If you have multiple apps, scripts, and agents talking to different model provid
 - `apps/desktop`: Electron tray/admin shell
 - `bin/`: stable wrapper scripts
 - `docs/USE_FROM_ANOTHER_PROJECT.md`: handoff guide for using this repo from another project
+- `docs/PROVIDER_SETUP_PLAYBOOK.md`: canonical provider and model setup guidance
+- `docs/SDK_RECIPES.md`: copy-paste SDK examples through the gateway
 
 ## Preferred entrypoints
 
@@ -196,6 +209,16 @@ npm start
 
 By default it polls `http://127.0.0.1:8787/admin`.
 
+Build a local macOS app bundle:
+
+```bash
+cd apps/desktop
+npm run pack:mac
+open release/mac-arm64/agent-llm.app
+```
+
+This produces an unsigned local `.app` bundle. Packaging works fully offline because the build is configured to reuse the Electron runtime already installed in `node_modules`.
+
 ## Admin API
 
 - `GET /health`
@@ -216,9 +239,13 @@ By default it polls `http://127.0.0.1:8787/admin`.
 
 Start with [`docs/USE_FROM_ANOTHER_PROJECT.md`](./docs/USE_FROM_ANOTHER_PROJECT.md).
 
+For model-specific request setup, defaults, and provider gotchas, read [`docs/PROVIDER_SETUP_PLAYBOOK.md`](./docs/PROVIDER_SETUP_PLAYBOOK.md) before wiring a new lab or model family.
+
+For copy-paste starting examples, use [`docs/SDK_RECIPES.md`](./docs/SDK_RECIPES.md).
+
 If another agent should adopt this repo as a local dependency, the short instruction is:
 
-> Use `../agent-llm` as the local LLM gateway for development. Do not add direct provider auth logic if the existing SDK can already target a base URL. Load `.env.agent-llm` for local/dev, keep direct provider env support for production, and make the integration switchable through environment variables.
+> Use `../agent-llm` as the local LLM gateway for development. Do not add direct provider auth logic if the existing SDK can already target a base URL. Before changing model params or payloads, read `../agent-llm/docs/PROVIDER_SETUP_PLAYBOOK.md`. Load `.env.agent-llm` for local/dev, keep direct provider env support for production, and make the integration switchable through environment variables.
 
 ## Security and storage
 

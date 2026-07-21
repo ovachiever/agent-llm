@@ -6,14 +6,20 @@ license.workspace = true
 
 [dependencies]
 agent-llm-core = { path = "../agent-llm-core" }
+agent-llm-translate = { path = "../agent-llm-translate" }
 anyhow.workspace = true
+futures-util.workspace = true
+tokio-stream.workspace = true
 axum.workspace = true
+base64.workspace = true
 clap.workspace = true
 chrono.workspace = true
 http.workspace = true
+rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true

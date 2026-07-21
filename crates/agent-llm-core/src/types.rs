@@ -8,15 +8,28 @@ pub enum ProviderKind {
     Anthropic,
     Google,
     OpenRouter,
+    Kimi,
+    LmStudio,
 }
 
 impl ProviderKind {
+    pub const ALL: [Self; 6] = [
+        Self::OpenAi,
+        Self::Anthropic,
+        Self::Google,
+        Self::OpenRouter,
+        Self::Kimi,
+        Self::LmStudio,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
             Self::Google => "google",
             Self::OpenRouter => "openrouter",
+            Self::Kimi => "kimi",
+            Self::LmStudio => "lmstudio",
         }
     }
 
@@ -26,6 +39,8 @@ impl ProviderKind {
             "anthropic" => Some(Self::Anthropic),
             "google" => Some(Self::Google),
             "openrouter" => Some(Self::OpenRouter),
+            "kimi" => Some(Self::Kimi),
+            "lmstudio" => Some(Self::LmStudio),
             _ => None,
         }
     }
@@ -37,6 +52,8 @@ pub enum AuthMode {
     ApiKey,
     OpenAiSession,
     AnthropicSession,
+    GoogleOAuth,
+    None,
 }
 
 impl AuthMode {
@@ -45,6 +62,8 @@ impl AuthMode {
             Self::ApiKey => "api_key",
             Self::OpenAiSession => "openai_session",
             Self::AnthropicSession => "anthropic_session",
+            Self::GoogleOAuth => "google_oauth",
+            Self::None => "none",
         }
     }
 
@@ -53,7 +72,17 @@ impl AuthMode {
             Self::ApiKey => "API key",
             Self::OpenAiSession => "OpenAI session",
             Self::AnthropicSession => "Anthropic session",
+            Self::GoogleOAuth => "Google OAuth",
+            Self::None => "No auth (local)",
         }
+    }
+
+    pub fn is_api_key(self) -> bool {
+        matches!(self, Self::ApiKey)
+    }
+
+    pub fn is_account_auth(self) -> bool {
+        !matches!(self, Self::ApiKey | Self::None)
     }
 
     pub fn parse_for_provider(provider: ProviderKind, value: &str) -> Option<Self> {
@@ -63,9 +92,12 @@ impl AuthMode {
             "anthropic_session" if provider == ProviderKind::Anthropic => {
                 Some(Self::AnthropicSession)
             }
+            "google_oauth" if provider == ProviderKind::Google => Some(Self::GoogleOAuth),
+            "none" if provider == ProviderKind::LmStudio => Some(Self::None),
             // Backward-compatible alias for the earlier generic auth mode.
             "oauth" if provider == ProviderKind::OpenAi => Some(Self::OpenAiSession),
             "oauth" if provider == ProviderKind::Anthropic => Some(Self::AnthropicSession),
+            "oauth" if provider == ProviderKind::Google => Some(Self::GoogleOAuth),
             _ => None,
         }
     }
@@ -76,6 +108,8 @@ impl AuthMode {
             (Self::ApiKey, _)
                 | (Self::OpenAiSession, ProviderKind::OpenAi)
                 | (Self::AnthropicSession, ProviderKind::Anthropic)
+                | (Self::GoogleOAuth, ProviderKind::Google)
+                | (Self::None, ProviderKind::LmStudio)
         )
     }
 }
@@ -244,7 +278,7 @@ mod tests {
         );
         assert_eq!(
             AuthMode::parse_for_provider(ProviderKind::Google, "oauth"),
-            None
+            Some(AuthMode::GoogleOAuth)
         );
     }
 
@@ -252,7 +286,47 @@ mod tests {
     fn rejects_invalid_provider_session_combinations() {
         assert!(!AuthMode::OpenAiSession.is_allowed_for_provider(ProviderKind::OpenRouter));
         assert!(!AuthMode::AnthropicSession.is_allowed_for_provider(ProviderKind::OpenAi));
+        assert!(!AuthMode::GoogleOAuth.is_allowed_for_provider(ProviderKind::OpenAi));
         assert!(AuthMode::ApiKey.is_allowed_for_provider(ProviderKind::Google));
+        assert!(AuthMode::GoogleOAuth.is_allowed_for_provider(ProviderKind::Google));
+    }
+
+    #[test]
+    fn distinguishes_api_and_account_auth_modes() {
+        assert!(AuthMode::ApiKey.is_api_key());
+        assert!(!AuthMode::OpenAiSession.is_api_key());
+        assert!(AuthMode::GoogleOAuth.is_account_auth());
+        assert!(!AuthMode::None.is_account_auth());
+        assert!(!AuthMode::None.is_api_key());
+    }
+
+    #[test]
+    fn supports_kimi_and_lmstudio_providers() {
+        assert_eq!(ProviderKind::parse("kimi"), Some(ProviderKind::Kimi));
+        assert_eq!(
+            ProviderKind::parse("lmstudio"),
+            Some(ProviderKind::LmStudio)
+        );
+        assert!(AuthMode::ApiKey.is_allowed_for_provider(ProviderKind::Kimi));
+        assert!(AuthMode::None.is_allowed_for_provider(ProviderKind::LmStudio));
+        assert!(!AuthMode::None.is_allowed_for_provider(ProviderKind::Kimi));
+        assert!(!AuthMode::AnthropicSession.is_allowed_for_provider(ProviderKind::Kimi));
+        assert_eq!(
+            AuthMode::parse_for_provider(ProviderKind::LmStudio, "none"),
+            Some(AuthMode::None)
+        );
+        assert_eq!(
+            AuthMode::parse_for_provider(ProviderKind::Kimi, "none"),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_explicit_google_oauth_mode() {
+        assert_eq!(
+            AuthMode::parse_for_provider(ProviderKind::Google, "google_oauth"),
+            Some(AuthMode::GoogleOAuth)
+        );
     }
 
     #[test]
