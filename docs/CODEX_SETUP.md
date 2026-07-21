@@ -2,7 +2,7 @@
 
 The gateway serves an OpenAI Responses API endpoint at `/v1/responses` and
 translates requests to each provider's native dialect. Codex therefore gets any
-configured upstream — Kimi K3, LM Studio local models, Anthropic, OpenRouter —
+configured upstream (Kimi K3, LM Studio local models, Anthropic, OpenRouter)
 from one base URL, with request logging and cost estimates landing in the usual
 `agent-llm` request log.
 
@@ -68,10 +68,10 @@ codex --profile local-oss "write a commit message for the staged diff"
 - **kimi**: points at Moonshot's pay-per-token platform endpoint
   (`api.moonshot.ai/anthropic`; the Kimi Code subscription is closed to new
   signups). Requires a funded platform account. K3 itself is not on the
-  platform tier — use `openrouter/moonshotai/kimi-k3` for K3, and note the
+  platform tier: use `openrouter/moonshotai/kimi-k3` for K3, and note the
   OpenRouter account's provider policy must permit Moonshot AI
   (openrouter.ai/settings): K3 has a single upstream provider.
-- **lmstudio**: nothing — a default no-auth profile ships preconfigured. Start
+- **lmstudio**: nothing: a default no-auth profile ships preconfigured. Start
   the server with `lms server start` (or the LM Studio UI). `GET /v1/models`
   live-refreshes the local model list whenever the server is reachable.
 - **anthropic / openai / openrouter**: same auth profiles the passthrough
@@ -90,5 +90,5 @@ curl -s http://127.0.0.1:8787/v1/responses \
 ```
 
 Request rows appear in `agent-llm status` / `/admin/requests` with token usage
-even for streamed calls — the translator reads usage off the stream, which the
+even for streamed calls: the translator reads usage off the stream, which the
 raw passthrough cannot do.

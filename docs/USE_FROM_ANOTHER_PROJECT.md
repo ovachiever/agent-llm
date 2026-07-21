@@ -24,6 +24,18 @@ Use `agent-llm` in local/dev so apps can keep their provider-native SDKs and pay
 
 Production can still call labs directly unless you explicitly choose to route through a hosted gateway.
 
+## Model setup source of truth
+
+Before changing model IDs, reasoning params, token budgets, or provider-specific headers, read:
+
+- [`./PROVIDER_SETUP_PLAYBOOK.md`](./PROVIDER_SETUP_PLAYBOOK.md)
+
+That file is the canonical guide for Anthropic Claude 4.6, OpenAI GPT-5 family, Google Gemini 2.5 and 3, and OpenRouter routing rules.
+
+For quick copy-paste examples, use:
+
+- [`./SDK_RECIPES.md`](./SDK_RECIPES.md)
+
 ## Stable commands
 
 Prefer the wrapper scripts:
@@ -103,8 +115,17 @@ Local mode points provider SDKs at:
 - `http://127.0.0.1:8787/anthropic/v1`
 - `http://127.0.0.1:8787/google/v1beta`
 - `http://127.0.0.1:8787/openrouter/v1`
+- `http://127.0.0.1:8787/kimi` (Anthropic protocol)
+- `http://127.0.0.1:8787/lmstudio/v1` (local, no upstream key needed)
 
 The generated project key becomes the local API key for those SDKs.
+
+Cross-protocol clients use the translation surfaces instead: Codex-style
+clients target `http://127.0.0.1:8787/v1` with `provider/model` ids (see
+[`CODEX_SETUP.md`](./CODEX_SETUP.md)), and Anthropic-protocol clients such as
+Claude Code target the same base for `/v1/messages` (see
+[`CLAUDE_CODE_SETUP.md`](./CLAUDE_CODE_SETUP.md)). Full endpoint reference:
+[`GATEWAY_API.md`](./GATEWAY_API.md).
 
 ## Switching modes
 
@@ -128,4 +149,4 @@ Switch it back to local gateway mode:
 
 Use this instruction in the target repo:
 
-> Use `../agent-llm` as the local LLM gateway for development. Do not add direct provider auth logic if the existing SDK can already target a base URL. Load `.env.agent-llm` for local/dev, keep direct-provider env support for production, and keep the switch controlled by environment variables rather than hardcoding the gateway.
+> Use `../agent-llm` as the local LLM gateway for development. Keep provider SDKs provider-native and point them at `agent-llm` base URLs instead of adding a custom abstraction. Before changing model params or request payloads, read `../agent-llm/docs/PROVIDER_SETUP_PLAYBOOK.md` and follow its provider-specific rules. Load `.env.agent-llm` for local/dev, keep direct-provider env support for production, and keep the switch controlled by environment variables rather than hardcoding the gateway.

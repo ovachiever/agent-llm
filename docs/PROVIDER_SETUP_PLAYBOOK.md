@@ -2,9 +2,9 @@
 
 This file is the canonical setup guide for wiring provider-native SDKs through `agent-llm`.
 
-Use it when a new project, script, or agent needs to talk to OpenAI, Anthropic, Google Gemini, or OpenRouter without rediscovering model-specific request quirks.
+Use it when a new project, script, or agent needs to talk to OpenAI, Anthropic, Google Gemini, OpenRouter, Kimi (Moonshot), or a local LM Studio server without rediscovering model-specific request quirks.
 
-Status date: 2026-03-10
+Status date: 2026-07-21
 
 ## Core rule
 
@@ -175,8 +175,8 @@ Example:
 The `kimi` provider targets Moonshot's pay-per-token platform endpoint (`https://api.moonshot.ai/anthropic`, Anthropic Messages protocol). The Kimi Code subscription endpoint (`api.kimi.com/coding`) closed to new signups in July 2026.
 
 - Auth: a platform.moonshot.ai API key stored as a normal `api_key` profile. Both `x-api-key` and bearer auth are accepted upstream; the gateway sends `x-api-key` plus `anthropic-version`.
-- The platform tier currently serves `kimi-k2.6` and `kimi-k2.7-code` — **not K3**. Verify with the models list before assuming; the account must be funded or every call returns `exceeded_current_quota_error`.
-- **K3 route:** `openrouter/moonshotai/kimi-k3` through `/v1/responses` ($3/M in, $15/M out, 1M context, int4). K3 has exactly one OpenRouter upstream (Moonshot AI), so the OpenRouter account's provider policy must permit it — a restrictive data-policy setting yields `404 No allowed providers are available`.
+- The platform tier currently serves `kimi-k2.6` and `kimi-k2.7-code`, **not K3**. Verify with the models list before assuming; the account must be funded or every call returns `exceeded_current_quota_error`.
+- **K3 route:** `openrouter/moonshotai/kimi-k3` through `/v1/responses` ($3/M in, $15/M out, 1M context, int4). K3 has exactly one OpenRouter upstream (Moonshot AI), so the OpenRouter account's provider policy must permit it; a restrictive data-policy setting yields `404 No allowed providers are available`.
 - Claude Code: `ANTHROPIC_BASE_URL=http://127.0.0.1:8787/kimi` + project key runs a session on the platform models with request logging.
 
 ### LM Studio (local)

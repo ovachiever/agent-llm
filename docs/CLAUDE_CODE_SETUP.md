@@ -27,7 +27,7 @@ background tasks stay on the routed model.
 ## Behavior notes
 
 - Unprefixed `claude-*` model ids (leaked from global settings pins, e.g.
-  subagent models) route to the Anthropic passthrough rather than erroring —
+  subagent models) route to the Anthropic passthrough rather than erroring;
   those turns bill your Anthropic API key and appear in the log under
   `anthropic`. The `[1m]` alias suffix is stripped.
 - `POST /v1/messages/count_tokens` returns a serialized-length estimate
