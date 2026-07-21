@@ -50,7 +50,7 @@ fn upstream_path(dialect: Dialect) -> &'static str {
 
 /// Split `provider/model` into a provider and the bare upstream model id.
 /// Model ids may themselves contain slashes (`lmstudio/qwen/qwen3.6-35b-a3b`).
-fn split_model(model: &str) -> Result<(ProviderKind, &str), ApiError> {
+pub(crate) fn split_model(model: &str) -> Result<(ProviderKind, &str), ApiError> {
     let (prefix, bare) = model.split_once('/').ok_or_else(|| {
         ApiError::bad_request(
             "model must be prefixed with a provider, e.g. \"lmstudio/openai/gpt-oss-20b\", \

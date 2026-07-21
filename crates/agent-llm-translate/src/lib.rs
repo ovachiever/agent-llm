@@ -9,6 +9,7 @@ mod anthropic;
 mod chat;
 mod request;
 mod response;
+mod reverse;
 mod sse;
 mod stream;
 
@@ -18,6 +19,7 @@ use serde_json::Value;
 
 pub use anthropic::{anthropic_response_to_responses, responses_to_anthropic};
 pub use chat::{chat_response_to_responses, responses_to_chat};
+pub use reverse::{ReverseStreamTranslator, anthropic_to_chat, chat_response_to_anthropic};
 pub use sse::{SseEvent, SseParser};
 pub use stream::{OutEvent, StreamTranslator};
 

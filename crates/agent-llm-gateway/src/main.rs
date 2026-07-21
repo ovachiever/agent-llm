@@ -1,7 +1,14 @@
 mod auth_flow;
+mod messages;
 mod responses;
 
-use std::{net::SocketAddr, path::PathBuf, time::Instant};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use agent_llm_core::{
     Database, LocalSecretStore, SecretStore, pricing,
@@ -55,6 +62,11 @@ struct AppState {
     auth_attempts: AuthAttemptManager,
     host: String,
     port: u16,
+    /// Keychain reads trigger a macOS auth prompt per (rebuilt, unsigned)
+    /// binary; caching resolved credentials keeps that to one read per
+    /// profile per process instead of one per request.
+    credential_cache:
+        Arc<Mutex<HashMap<i64, (chrono::DateTime<chrono::Utc>, ResolvedAuthProfile)>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -126,6 +138,7 @@ async fn main() -> Result<()> {
         auth_attempts: AuthAttemptManager::default(),
         host: args.host.clone(),
         port: args.port,
+        credential_cache: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -150,6 +163,8 @@ async fn main() -> Result<()> {
         )
         .route("/v1/responses", post(responses::responses_create))
         .route("/v1/models", get(responses::models_list))
+        .route("/v1/messages", post(messages::messages_create))
+        .route("/v1/messages/count_tokens", post(messages::count_tokens))
         .route("/{provider}/{*path}", any(proxy_request))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -1048,6 +1063,19 @@ async fn resolve_profile(
     provider: ProviderKind,
     profile: &agent_llm_core::types::AuthProfile,
 ) -> Result<ResolvedAuthProfile, ApiError> {
+    if let Some((stamp, cached)) = state
+        .credential_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&profile.id).cloned())
+    {
+        // updated_at changes when the profile is edited; expiring session
+        // tokens fall through to the refresh path below.
+        if stamp == profile.updated_at && !cached.credential.needs_refresh() {
+            return Ok(cached);
+        }
+    }
+
     let raw_secret = if profile.auth_mode == AuthMode::None {
         String::new()
     } else {
@@ -1064,13 +1092,17 @@ async fn resolve_profile(
         credential = refreshed;
     }
 
-    Ok(ResolvedAuthProfile {
+    let resolved = ResolvedAuthProfile {
         id: profile.id,
         name: profile.name.clone(),
         auth_mode: profile.auth_mode,
         metadata: profile.metadata.clone(),
         credential,
-    })
+    };
+    if let Ok(mut cache) = state.credential_cache.lock() {
+        cache.insert(profile.id, (profile.updated_at, resolved.clone()));
+    }
+    Ok(resolved)
 }
 
 fn local_admin_base_url(host: &str, port: u16) -> String {
